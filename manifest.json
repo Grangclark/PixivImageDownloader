@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "PixivImageDownloader",
+  "version": "5.0",
+  "description": "Powerful image downloader for pixiv using background fetch",
+  "permissions": [
+    "downloads",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://*.pixiv.net/*",
+    "https://*.pximg.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.pixiv.net/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
