@@ -5,11 +5,12 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "https://www.pixiv.net/*",
-    "https://i.pximg.net/*"
+    "https://*.pximg.net/*"
   ],
   "background": {
     "service_worker": "background.js"

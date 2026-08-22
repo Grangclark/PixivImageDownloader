@@ -7,21 +7,47 @@
 // content.js
 
 /**
- * 1枚目の画像URLと総ページ数から、全ページの画像URLリストを生成する関数
+ * 単一の画像URLを background 経由で取得して Blob を返すヘルパー関数
  */
-function generateAllImageUrls(firstImageUrl, pageCount) {
-  const urls = [];
-  for (let i = 0; i < pageCount; i++) {
-    const pageUrl = firstImageUrl.replace(/_p0(\.[a-zA-Z]+)$/, `_p${i}$1`);
-    urls.push(pageUrl);
-  }
-  return urls;
+function fetchImageBlob(imageUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ message: "download_blob", url: imageUrl }, (response) => {
+      if (chrome.runtime.lastError) {
+        return reject(new Error(chrome.runtime.lastError.message));
+      }
+      if (!response || !response.success || !response.dataUrl) {
+        return reject(new Error(response?.error || "画像取得に失敗しました"));
+      }
+      fetch(response.dataUrl)
+        .then(res => res.blob())
+        .then(blob => resolve(blob))
+        .catch(err => reject(err));
+    });
+  });
+}
+
+/**
+ * background.js 経由で画像バイトデータを取得して Uint8Array を返す
+ */
+function fetchImageBytes(imageUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ message: "download_bytes", url: imageUrl }, (response) => {
+      if (chrome.runtime.lastError) {
+        return reject(new Error(chrome.runtime.lastError.message));
+      }
+      if (!response || !response.success || !response.byteArray) {
+        return reject(new Error(response?.error || "画像取得に失敗しました"));
+      }
+      // バイト列からバイナリ配列を復元
+      const uint8 = new Uint8Array(response.byteArray);
+      resolve(uint8);
+    });
+  });
 }
 
 // ボタンの動的生成と監視
 setInterval(() => {
   const existingBtn = document.getElementById('pixiv-dl-btn');
-  // Pixivのイラストページ（/artworks/数字）にいる場合のみボタンを表示
   if (location.host === 'www.pixiv.net' && location.pathname.includes('/artworks/') && !existingBtn) {
     const dlBtn = document.createElement('button');
     dlBtn.id = 'pixiv-dl-btn';
@@ -29,34 +55,52 @@ setInterval(() => {
     dlBtn.style.cssText = "position:fixed; top:20px; right:20px; z-index:9999; padding:10px 15px; background:#0096fa; color:#fff; border:none; border-radius:5px; font-weight:bold; cursor:pointer;";
 
     dlBtn.onclick = async () => {
-      // 1. URLからイラストIDを取得 (例: /artworks/12345678 -> 12345678)
       const illustId = location.pathname.split('/').pop();
       if (!illustId || isNaN(illustId)) return alert("イラストIDの取得に失敗しました");
 
       try {
-        dlBtn.innerText = "⏳ 情報取得中...";
+        dlBtn.disabled = true;
+        dlBtn.innerText = "⏳ 作品情報解析中...";
 
-        // 2. Pixivの内部データ(API)を取得して、原寸URLと枚数を解析
-        const res = await fetch(`https://www.pixiv.net/ajax/illust/${illustId}`);
-        const data = await res.json();
+        // 1. 全ページの原寸画像URLを取得
+        const pagesRes = await fetch(`https://www.pixiv.net/ajax/illust/${illustId}/pages`);
+        const pagesData = await pagesRes.json();
         
-        if (data.error) return alert("イラスト情報の取得に失敗しました");
+        if (pagesData.error || !pagesData.body) {
+          throw new Error("全ページ情報の取得に失敗しました");
+        }
 
-        const pageCount = data.body.pageCount; // 総枚数
-        const originalFirstUrl = data.body.urls.original; // 原寸1枚目のURL (_p0)
+        const allUrls = pagesData.body.map(item => item.urls.original);
+        const totalCount = allUrls.length;
+        console.log(`[PixivImageDownloader] 全${totalCount}枚の取得を開始します...`);
 
-        // 3. 全ページの原寸URLリストを自動生成！
-        const allUrls = generateAllImageUrls(originalFirstUrl, pageCount);
+        const zip = new JSZip();
 
-        console.log(`🎉 [PixivImageDownloader] 全${pageCount}枚のURLを生成しました:`, allUrls);
-        alert(`全${pageCount}枚のURL取得に成功！\nコンソール(F12)で生成されたURL一覧を確認できます。`);
+        // 2. background経由で順次取得してZIPへ追加
+        for (let i = 0; i < totalCount; i++) {
+          const url = allUrls[i];
+          dlBtn.innerText = `⏳ 取得中 (${i + 1}/${totalCount})...`;
 
-        // ※ 2日目にここで `allUrls` を使ってZIP化・ダウンロードを行います！
+          const uint8Data = await fetchImageBytes(url);
+          const ext = url.split('.').pop().split('?')[0];
+          const fileName = `${illustId}_p${i}.${ext}`;
+
+          // Uint8Array は JSZip にそのまま渡せます
+          zip.file(fileName, uint8Data);
+          console.log(`✅ [${i + 1}/${totalCount}] 格納完了: ${fileName}`);
+        }
+
+        dlBtn.innerText = "📦 ZIP圧縮中...";
+        const fileCount = Object.keys(zip.files).length;
+        alert(`🎉 全${fileCount}枚の画像データをZIPに格納完了しました！`);
+
+        dlBtn.disabled = false;
         dlBtn.innerText = "📦 全画像をZIP保存";
 
       } catch (err) {
-        console.error(err);
+        console.error("[PixivImageDownloader Error]:", err);
         alert("エラーが発生しました: " + err.message);
+        dlBtn.disabled = false;
         dlBtn.innerText = "📦 全画像をZIP保存";
       }
     };
