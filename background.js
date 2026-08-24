@@ -1,48 +1,7 @@
-// 1. ブラウザ自体に「pximg.netへの通信は全部pixivのふりをせよ」と命令する
-chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [1],
-    addRules: [{
-        id: 1,
-        priority: 1,
-        action: {
-            type: "modifyHeaders",
-            requestHeaders: [
-                { header: "Referer", operation: "set", value: "https://www.pixiv.net/" },
-                { header: "Origin", operation: "set", value: "https://www.pixiv.net" }
-            ]
-        },
-        condition: { urlFilter: "pximg.net", resourceTypes: ["xmlhttprequest"] }
-    }]
-});
-
-// 2. その状態で fetch を実行する
 // background.js
+importScripts("jszip.min.js");
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.message === "download_bytes") {
-    fetch(request.url, {
-      headers: {
-        "Referer": "https://www.pixiv.net/"
-      }
-    })
-    .then(res => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.arrayBuffer();
-    })
-    .then(buffer => {
-      // ArrayBuffer をバイト配列にして送信
-      const byteArray = Array.from(new Uint8Array(buffer));
-      sendResponse({ success: true, byteArray: byteArray });
-    })
-    .catch(err => {
-      console.error("[Background Fetch Error]:", err);
-      sendResponse({ success: false, error: err.message });
-    });
-
-    return true; // 非同期通信を維持
-  }
-});
-
+// Refererヘッダー自動付与ルールの設定
 chrome.runtime.onInstalled.addListener(() => {
   const RULE_ID = 1;
   const rule = {
@@ -51,11 +10,7 @@ chrome.runtime.onInstalled.addListener(() => {
     action: {
       type: "modifyHeaders",
       requestHeaders: [
-        {
-          header: "Referer",
-          operation: "set",
-          value: "https://www.pixiv.net/"
-        }
+        { header: "Referer", operation: "set", value: "https://www.pixiv.net/" }
       ]
     },
     condition: {
@@ -67,7 +22,54 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: [RULE_ID],
     addRules: [rule]
-  }, () => {
-    console.log("[PixivImageDownloader] Refererヘッダー自動付与ルールを適用しました");
   });
+});
+
+// ZIP生成＆ダウンロードの受付
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.message === "start_zip_download") {
+    const { illustId, urls } = request;
+
+    (async () => {
+      try {
+        const zip = new JSZip();
+
+        // CORS制限のないService Workerから直接fetch
+        for (let i = 0; i < urls.length; i++) {
+          const url = urls[i];
+          const res = await fetch(url, {
+            headers: { "Referer": "https://www.pixiv.net/" }
+          });
+          if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+          
+          const blob = await res.blob();
+          const ext = url.split('.').pop().split('?')[0];
+          const fileName = `${illustId}_p${i}.${ext}`;
+          
+          zip.file(fileName, blob);
+        }
+
+        // 高速化のため STORE (無圧縮) でZIPをBase64化
+        const base64 = await zip.generateAsync({
+          type: "base64",
+          compression: "STORE"
+        });
+
+        // chrome.downloads API で一発保存
+        const dataUrl = `data:application/zip;base64,${base64}`;
+        await chrome.downloads.download({
+          url: dataUrl,
+          filename: `pixiv_${illustId}.zip`,
+          saveAs: false
+        });
+
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error("[Background ZIP Error]:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+
+    return true; // 非同期処理を維持
+  }
 });
