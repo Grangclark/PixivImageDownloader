@@ -4,7 +4,7 @@ setInterval(() => {
   const isArtworkPage = location.host === 'www.pixiv.net' && location.pathname.includes('/artworks/');
   const existingBtn = document.getElementById('pixiv-dl-btn');
 
-  // 作品ページ以外ならボタンを消す
+  // 作品ページ以外ならボタンを削除
   if (!isArtworkPage) {
     if (existingBtn) existingBtn.remove();
     return;
@@ -15,7 +15,23 @@ setInterval(() => {
     const dlBtn = document.createElement('button');
     dlBtn.id = 'pixiv-dl-btn';
     dlBtn.innerText = "📦 全画像をZIP保存";
-    dlBtn.style.cssText = "position:fixed; top:20px; right:20px; z-index:9999; padding:10px 15px; background:#0096fa; color:#fff; border:none; border-radius:5px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2);";
+
+    // 🎯 指定の親要素（div.sc-4a56e1b9-1）を探す
+    const targetContainer = document.querySelector('.sc-4a56e1b9-1');
+
+    if (targetContainer) {
+      // 親要素が相対位置を持てるように設定
+      if (getComputedStyle(targetContainer).position === 'static') {
+        targetContainer.style.position = 'relative';
+      }
+      // 指定要素の右上に絶対配置
+      dlBtn.style.cssText = "position:absolute; top:10px; right:10px; z-index:9999; padding:8px 14px; background:#0096fa; color:#fff; border:none; border-radius:5px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2);";
+      targetContainer.appendChild(dlBtn);
+    } else {
+      // 親要素が取得できない場合の安全な固定位置（ヘッダーアイコン下の top:80px）
+      dlBtn.style.cssText = "position:fixed; top:80px; right:20px; z-index:9999; padding:10px 15px; background:#0096fa; color:#fff; border:none; border-radius:5px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2);";
+      document.body.appendChild(dlBtn);
+    }
 
     dlBtn.onclick = async () => {
       const match = location.pathname.match(/\/artworks\/(\d+)/);
@@ -36,7 +52,6 @@ setInterval(() => {
         const allUrls = pagesData.body.map(item => item.urls.original);
         dlBtn.innerText = `⏳ ダウンロード＆ZIP化中 (${allUrls.length}枚)...`;
 
-        // background 側に一任
         chrome.runtime.sendMessage({
           message: "start_zip_download",
           illustId: illustId,
@@ -68,7 +83,5 @@ setInterval(() => {
         dlBtn.innerText = "📦 全画像をZIP保存";
       }
     };
-
-    document.body.appendChild(dlBtn);
   }
 }, 1000);
