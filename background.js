@@ -1,7 +1,6 @@
 // background.js
 importScripts("jszip.min.js");
 
-// Refererヘッダー自動付与ルールの設定
 chrome.runtime.onInstalled.addListener(() => {
   const RULE_ID = 1;
   const rule = {
@@ -25,16 +24,14 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// ZIP生成＆ダウンロードの受付
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.message === "start_zip_download") {
-    const { illustId, urls } = request;
+    const { illustId, urls, fileName } = request;
 
     (async () => {
       try {
         const zip = new JSZip();
 
-        // CORS制限のないService Workerから直接fetch
         for (let i = 0; i < urls.length; i++) {
           const url = urls[i];
           const res = await fetch(url, {
@@ -44,22 +41,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           
           const blob = await res.blob();
           const ext = url.split('.').pop().split('?')[0];
-          const fileName = `${illustId}_p${i}.${ext}`;
+          const entryName = `${illustId}_p${i}.${ext}`;
           
-          zip.file(fileName, blob);
+          zip.file(entryName, blob);
         }
 
-        // 高速化のため STORE (無圧縮) でZIPをBase64化
         const base64 = await zip.generateAsync({
           type: "base64",
           compression: "STORE"
         });
 
-        // chrome.downloads API で一発保存
         const dataUrl = `data:application/zip;base64,${base64}`;
+        
+        // 👑 指定された [作者名] 作品タイトル_作品ID.zip で保存
+        const finalFileName = fileName || `pixiv_${illustId}.zip`;
+
         await chrome.downloads.download({
           url: dataUrl,
-          filename: `pixiv_${illustId}.zip`,
+          filename: finalFileName,
           saveAs: false
         });
 
@@ -70,6 +69,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
 
-    return true; // 非同期処理を維持
+    return true;
   }
 });
